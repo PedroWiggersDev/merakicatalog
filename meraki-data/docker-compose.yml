@@ -1,0 +1,53 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Configure POSTGRES_DB in .env}
+      POSTGRES_USER: meraki_bootstrap
+      POSTGRES_PASSWORD: ${DB_BOOTSTRAP_PASSWORD:?Configure DB_BOOTSTRAP_PASSWORD in .env}
+      MERAKI_CATALOG_DB_PASSWORD: ${DB_READER_PASSWORD:?Configure DB_READER_PASSWORD in .env}
+      MERAKI_DATA_DB_PASSWORD: ${DB_WRITER_PASSWORD:?Configure DB_WRITER_PASSWORD in .env}
+    volumes:
+      - meraki_postgres_data:/var/lib/postgresql/data
+      - ./database/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  meraki-data:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:?Configure POSTGRES_DB in .env}
+      DB_WRITER_USER: meraki_data
+      DB_WRITER_PASSWORD: ${DB_WRITER_PASSWORD:?Configure DB_WRITER_PASSWORD in .env}
+      DB_READER_USER: meraki_catalog_reader
+      DB_READER_PASSWORD: ${DB_READER_PASSWORD:?Configure DB_READER_PASSWORD in .env}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?Configure ADMIN_EMAIL in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Configure ADMIN_PASSWORD in .env}
+      SESSION_SECRET: ${SESSION_SECRET:?Configure SESSION_SECRET in .env}
+    ports:
+      - "${MERAKI_DATA_PORT:-3000}:3000"
+    volumes:
+      - meraki_uploads:/app/storage/uploads
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 25s
+
+volumes:
+  meraki_postgres_data:
+  meraki_uploads:
